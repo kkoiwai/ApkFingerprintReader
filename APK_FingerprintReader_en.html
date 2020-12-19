@@ -24,6 +24,7 @@
 
             document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
 
+            // https://qiita.com/yun_bow/items/1b9e86a2efe12432845d
             var zipReader = new FileReader();
             zipReader.onload = function () {
                 try {
@@ -48,12 +49,14 @@
                     console.log(RsaBuffer);
 
                     // 証明書Fingerprintの算出
-                    // https://github.com/digitalbazaar/forge/issues/596
 
                     // unzipの出力はuint8arrayだが、forgeの入力はbinary-stringなので変換
+                    // https://github.com/digitalbazaar/forge/issues/336#issuecomment-164207665
+                    // https://stackoverflow.com/questions/16363419/how-to-get-binary-string-from-arraybuffer
                     binstr = String.fromCharCode.apply(null, new Uint16Array(RsaBuffer));
                     console.log(binstr);
 
+                    // https://github.com/digitalbazaar/forge/issues/596
                     // RSAファイルはDER形式、これを読み込んで証明書を取り出す
                     var obj = forge.asn1.fromDer(binstr);
                     var msg = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(binstr));
