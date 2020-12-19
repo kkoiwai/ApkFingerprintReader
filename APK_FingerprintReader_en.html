@@ -1,0 +1,153 @@
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>APK Certificate Fingerprint Extractor</title>
+
+    <!-- https://github.com/imaya/zlib.js/ -->
+    <script language="JavaScript" type="text/javascript" src="./unzip.min.js"></script>
+    <!-- https://github.com/digitalbazaar/forge -->
+    <script language="JavaScript" type="text/javascript" src="./forge.min.js"></script>
+    <script language="JavaScript" type="text/javascript">
+        // https://www.html5rocks.com/ja/tutorials/file/dndfiles//
+
+        // ファイルを選択したら呼ばれる
+        function handleFileSelect(evt) {
+
+            var file = document.getElementById('files').files[0];
+            console.log(file);
+
+            // ファイル名などを出力
+            var output = [];
+            output.push('<li><strong>', escape(file.name), '</strong> (', file.type || 'n/a', ') - ',
+                file.size, ' bytes', '</li>');
+
+            document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+
+            var zipReader = new FileReader();
+            zipReader.onload = function () {
+                try {
+
+                    // ファイルを読み込んで、unzipする
+                    var zipArr = new Uint8Array(zipReader.result);
+                    var unzip = new Zlib.Unzip(zipArr);
+
+                    // デバッグ用にファイルの一覧を出力
+                    var importFileList = unzip.getFilenames();
+                    console.log(importFileList);
+
+                    // 証明書ファイルを探す
+                    rsafilename = importFileList.find(
+                        function (str) {
+                            return str.search(/.RSA/) > -1;
+                        }
+                    );
+
+                    // 見つかった証明書ファイルを解答する
+                    var RsaBuffer = unzip.decompress(rsafilename);
+                    console.log(RsaBuffer);
+
+                    // 証明書Fingerprintの算出
+                    // https://github.com/digitalbazaar/forge/issues/596
+
+                    // unzipの出力はuint8arrayだが、forgeの入力はbinary-stringなので変換
+                    binstr = String.fromCharCode.apply(null, new Uint16Array(RsaBuffer));
+                    console.log(binstr);
+
+                    // RSAファイルはDER形式、これを読み込んで証明書を取り出す
+                    var obj = forge.asn1.fromDer(binstr);
+                    var msg = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(binstr));
+                    var cert = msg.certificates[0];
+
+                    // 証明書のFingerprintは証明書自体のDERのSHA256ハッシュ
+                    var der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+                    var m = forge.md.sha256.create();
+                    m.start();
+                    m.update(der);
+                    //2桁ごとにコロンで分ける
+                    var fingerprint = m.digest()
+                        .toHex()
+                        .match(/.{2}/g)
+                        .join(':')
+                        .toUpperCase();
+                    console.log(fingerprint)
+
+                    // 結果を出力
+                    var ul = document.getElementsByTagName("ul");
+                    var li = document.createElement("li")
+                    li.innerHTML = '<strong>Fingerprint:</strong> <input id="fingerprint" readonly size=100 value="' + fingerprint + '" />';
+                    ul[0].appendChild(li);
+                    document.getElementById('fingerprint').select();
+
+                } catch (e) {
+                    // エラーが発生したらアラート
+                    alert(e.message);
+                    console.log(e.stack);
+                }
+            }
+            zipReader.readAsArrayBuffer(file);
+        }
+
+        window.onload = function () {
+            // ファイルが選択されたら実行
+            document.getElementById('files').addEventListener('change', handleFileSelect, false);
+        }
+
+    </script>
+    <!-- https://saruwakakun.com/html-css/reference/box -->
+    <style>
+        .box27 {
+            position: relative;
+            margin: 2em 0;
+            padding: 0.5em 1em;
+            border: solid 3px rgb(255, 0, 191);
+        }
+
+        .box27 .box-title {
+            position: absolute;
+            display: inline-block;
+            top: -27px;
+            left: -3px;
+            padding: 0 9px;
+            height: 25px;
+            line-height: 25px;
+            font-size: 17px;
+            background: rgb(255, 0, 191);
+            color: #ffffff;
+            font-weight: bold;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .box27 p {
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Android APK Fingerprint Reader</h1>
+
+    <p>
+        Select apk (or any signed jar) file to output fingerprint
+    </p>
+    <div class="box27">
+        <span class="box-title">Causion!</span>
+        <p>Always watch for a website that secretly send your data.</p>
+        <p>This page will process your file locally, but make sure so by checking your browser development console.</p>
+    </div>
+
+    <form name="form1">
+        <input type="file" id="files" name="files[]" />
+        <output id="list"></output>
+    </form>
+
+    <h3>Powerd by:</h3>
+    <ul>
+        <li> <a href="https://github.com/imaya/zlib.js/">zlib.js</a> </li>
+        <li> <a href="https://github.com/digitalbazaar/forge">forge</a> </li>
+    </ul>
+    <p>the page is creative commons but the parts derived from others may not so.</p>
+</body>
+
+</html>
