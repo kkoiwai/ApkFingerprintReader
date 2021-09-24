@@ -12,7 +12,7 @@
         // https://www.html5rocks.com/ja/tutorials/file/dndfiles//
 
         // ファイルを選択したら呼ばれる
-        function handleFileSelect(evt) {
+        async function handleFileSelect(evt) {
 
             var file = document.getElementById('files').files[0];
             console.log(file);
@@ -24,6 +24,12 @@
 
             document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
 
+            // V3 Fingerprintがある場合は抽出
+            if (res = await extractV3Finterprint(file)) {
+                return;
+            }
+
+            // ない場合はV1(JAR)署名を抽出
             // https://qiita.com/yun_bow/items/1b9e86a2efe12432845d
             var zipReader = new FileReader();
             zipReader.onload = function () {
@@ -90,6 +96,93 @@
             }
             zipReader.readAsArrayBuffer(file);
         }
+
+
+        // apkファイルからFingerprintを取り出す
+        async function extractV3Finterprint(file) {
+
+            // MAGIC WORD "APK Sig Block 42" を探す
+            //https://source.android.google.cn/security/apksigning/v2#apk-signing-block-format
+            var binstr = await getBinaryString(file);
+            var sigMagicInd = binstr.lastIndexOf("APK Sig Block 42"); // MAGIC WORD
+            console.log("SigMagicInd: " + sigMagicInd)
+            // 見付からなかった場合(-1)は処理を行わない
+            if (sigMagicInd < 0) return false;
+
+            var buffer = await file.arrayBuffer();
+            var apkArr = new Uint8Array(buffer);
+
+            // MAGICの直前にブロックサイズが記載
+            // Blockサイズがuint64で入っている
+            var bsArr = apkArr.slice(sigMagicInd - 8, sigMagicInd)
+            console.log("bsArr: " + bsArr)
+            // javascriptでuint64は扱えないのでuint32で取り出す
+            var bs = bsArr[0] + bsArr[1] * 256 + bsArr[2] * 256 * 256 + bsArr[3] * 256 * 256 * 256
+            console.log("bs: " + bs)
+
+            // V3署名のIDを探す 0xf05368c0.
+            var v3ID = String.fromCharCode(0xc0) + String.fromCharCode(0x68) + String.fromCharCode(0x53) + String.fromCharCode(0xf0);
+            var v3SigIDind = binstr.indexOf(v3ID, sigMagicInd - bs);
+            console.log("v3SigIDind: " + v3SigIDind)
+
+            // 見付からなかった場合(-1)は処理を行わない
+            if (v3SigIDind < 0) return false;
+
+            // V3 Blockサイズがuint64で入っている
+            var v3bsArr = apkArr.slice(v3SigIDind - 8, v3SigIDind)
+            console.log("v3bsArr: " + v3bsArr)
+            // javascriptでuint64は扱えないのでuint32で取り出す
+            var v3bs = v3bsArr[0] + v3bsArr[1] * 256 + v3bsArr[2] * 256 * 256 + v3bsArr[3] * 256 * 256 * 256
+            console.log("v3bs: " + v3bs)
+
+            // V3署名ブロックを取り出す
+            var v3sigBlock = apkArr.slice(v3SigIDind + 4, sigMagicInd + v3bs)
+            console.log("v3sigBlock: " + v3sigBlock)
+
+            // algorithm ID : https://android.googlesource.com/platform/tools/apksig/+/master/src/main/java/com/android/apksig/internal/apk/SignatureAlgorithm.java
+            //  or https://source.android.google.cn/security/apksigning/v2#signature-algorithm-ids
+
+            // certificateはdigestsの後にある
+            // certificateを取り出す
+            var certInd = 16 + v3sigBlock[12] + v3sigBlock[12 + 1] * 256
+            console.log("certInd: " + certInd)
+            // console.log("certInd: " + v3sigBlock.slice(certInd , certInd + 8))
+
+            var certLen = v3sigBlock[certInd] + v3sigBlock[certInd + 1] * 256
+            console.log("certLen: " + certLen)
+
+            var certBlock = v3sigBlock.slice(certInd + 8, certInd + 4 + certLen)
+            console.log("certBlock: " + certBlock)
+
+            // certificate のSHA-256ハッシュを取り出す
+            var hashBuffer = await crypto.subtle.digest('SHA-256', certBlock);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));                     // convert buffer to byte array
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join(':'); // convert bytes to hex string
+
+            console.log(hashHex);
+
+            // 結果を出力
+            var ul = document.getElementsByTagName("ul");
+            var li = document.createElement("li")
+            li.innerHTML = '<strong>Fingerprint:</strong> <input id="fingerprint" readonly size=100 value="' + hashHex + '" />';
+            ul[0].appendChild(li);
+            document.getElementById('fingerprint').select();
+
+            return true;
+
+        }
+
+        // Promiseで返す
+        async function getBinaryString(file) {
+            return new Promise((resolve, reject) => {
+                var apkStrReader = new FileReader();
+                apkStrReader.onload = () => {
+                    resolve(apkStrReader.result)
+                }
+                apkStrReader.readAsBinaryString(file);
+            });
+        }
+
 
         window.onload = function () {
             // ファイルが選択されたら実行
